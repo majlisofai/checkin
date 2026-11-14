@@ -1,0 +1,15 @@
+{
+  "name": "checkin",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Live QR check-in board for classes and workshops, on Cloudflare Workers and Durable Objects.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.162.0"
+  }
+}

@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Check-in · The Majlis of AI</title>
+<meta name="description" content="Project a QR code, set the expected headcount, and watch check-ins fill the meter from red to orange to green until the class can start.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231d9652'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11.5' fill='none' stroke='white' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="/style.css">
+<script src="/vendor/qrcode.min.js" defer></script>
+<script src="/app.js" defer></script>
+</head>
+<body>
+<main>
+  <section id="view-loading" class="msg">
+    <p class="eyebrow">Check-in</p>
+    <h1>Opening check-in…</h1>
+    <p>Connecting to the live headcount.</p>
+  </section>
+
+  <section id="view-message" class="msg" hidden>
+    <p class="eyebrow">Check-in</p>
+    <h1 id="m-title"></h1>
+    <p id="m-body"></p>
+    <a class="btn" href="/" id="m-home">Create a new check-in</a>
+  </section>
+
+  <section id="view-create" class="create" hidden>
+    <div>
+      <p class="eyebrow">Check-in</p>
+      <h1>Create a new check-in</h1>
+    </div>
+    <p class="lede">Set how many people you expect. A QR code appears for the room, and the headcount rises as each person scans and taps “I’m here”.</p>
+    <form class="card" id="create-form" novalidate>
+      <div class="field">
+        <label for="f-title">Session name</label>
+        <input type="text" id="f-title" maxlength="80" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="f-total">Number of participants</label>
+        <input type="number" id="f-total" min="1" max="1000" step="1" value="30" inputmode="numeric">
+      </div>
+      <div class="row2">
+        <div class="field">
+          <label for="f-amber"><span class="swatch" style="background:var(--amber)"></span>Orange from</label>
+          <input type="number" id="f-amber" min="1" max="99" step="1" value="30" inputmode="numeric">
+          <span class="hint">% checked in. Red below this.</span>
+        </div>
+        <div class="field">
+          <label for="f-green"><span class="swatch" style="background:var(--green)"></span>Green from</label>
+          <input type="number" id="f-green" min="2" max="100" step="1" value="60" inputmode="numeric">
+          <span class="hint">% checked in. Class can start at 100%.</span>
+        </div>
+      </div>
+      <p class="form-error" id="f-error" hidden></p>
+      <div class="form-actions">
+        <button type="submit" class="primary" id="f-submit">Create check-in</button>
+      </div>
+    </form>
+    <section class="recent" id="recent" hidden>
+      <h2>Your recent check-ins</h2>
+      <ul id="recent-list"></ul>
+    </section>
+  </section>
+
+  <section id="view-host" hidden>
+    <header class="bar">
+      <div>
+        <p class="eyebrow" id="h-meta">Check-in</p>
+        <h1 id="h-title">Check-in</h1>
+      </div>
+      <div class="actions">
+        <button type="button" id="btn-walkin" title="Count someone who can't scan">+1 walk-in</button>
+        <button type="button" id="btn-undo" disabled>Undo walk-in</button>
+        <a class="btn" href="/" id="btn-new">New check-in</a>
+      </div>
+    </header>
+
+    <div class="board" id="board" data-state="red">
+      <figure class="qr-card">
+        <div id="qr" role="img" aria-label="QR code to check in"></div>
+        <figcaption>
+          <strong>Scan to check in</strong>
+          <span class="mono" id="link-text"></span>
+          <div class="copy-row">
+            <button type="button" id="btn-copy">Copy check-in link</button>
+            <button type="button" id="btn-copy-host" title="Share with a co-host">Copy host link</button>
+          </div>
+        </figcaption>
+      </figure>
+
+      <div class="count-panel" aria-live="polite">
+        <p class="chip" id="chip">Waiting for people</p>
+        <div class="count"><span class="n" id="n">0</span><span class="of">/ <span id="total">0</span></span></div>
+        <div>
+          <div class="meter" aria-hidden="true">
+            <div class="fill" id="fill"></div>
+            <span class="tick" id="tick-amber"></span>
+            <span class="tick" id="tick-green"></span>
+          </div>
+          <div class="scale" aria-hidden="true">
+            <span style="left:0">0%</span>
+            <span id="lbl-amber"></span>
+            <span id="lbl-green"></span>
+            <span style="left:100%">100%</span>
+          </div>
+        </div>
+        <p class="summary" id="summary"></p>
+        <span class="live off" id="live">Connecting…</span>
+      </div>
+    </div>
+
+    <section class="arrivals">
+      <div class="arrivals-head">
+        <h2>Arrivals</h2>
+        <span class="eyebrow" id="arr-count"></span>
+      </div>
+      <ol id="arrivals"></ol>
+      <p class="empty" id="arr-empty">No one yet. Email addresses appear here as people check in.</p>
+    </section>
+  </section>
+
+  <section id="view-guest" class="guest" hidden>
+    <div class="guest-card" id="guest-card" data-state="red">
+      <p class="eyebrow" id="g-title">Check-in</p>
+      <div class="done-mark" id="g-mark" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+      </div>
+      <h1 id="g-head">Check in to this session</h1>
+      <div class="field" id="g-email-field">
+        <label for="g-email">Your email address</label>
+        <input type="email" id="g-email" maxlength="254" autocomplete="email" inputmode="email" autocapitalize="off" spellcheck="false" placeholder="name@example.com" required>
+      </div>
+      <button type="button" class="big" id="btn-checkin">I’m here</button>
+      <p class="note" id="g-note"></p>
+      <div class="mini">
+        <div class="meter" aria-hidden="true"><div class="fill" id="g-fill"></div></div>
+        <p id="g-count"></p>
+      </div>
+    </div>
+  </section>
+</main>
+<footer>The Majlis of AI · <a href="https://github.com/majlisofai/checkin">Source</a></footer>
+<div class="toast" id="toast" role="status" hidden></div>
+</body>
+</html>
