@@ -127,12 +127,22 @@ function openCreate() {
     const a = document.createElement("a");
     a.href = "/h/" + r.sid + "#" + r.key;
     a.textContent = r.title;
+    if (r.ended) { const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = " · ended"; a.appendChild(tag); }
     const t = document.createElement("time");
     t.textContent = new Date(r.createdAt).toLocaleDateString([], { month: "short", day: "numeric" }) + " · " + timeOf(r.createdAt);
     li.append(a, t);
     list.appendChild(li);
   }
   $("f-title").focus();
+  let endedMsg = null;
+  try { endedMsg = sessionStorage.getItem("checkin-ended-msg"); sessionStorage.removeItem("checkin-ended-msg"); } catch {}
+  if (endedMsg) toast(endedMsg);
+}
+
+function markHostedEnded(id) {
+  const hosted = store.get("checkin-hosted", []);
+  const rec = hosted.find((r) => r.sid === id);
+  if (rec && !rec.ended) { rec.ended = true; store.set("checkin-hosted", hosted); }
 }
 
 $("create-form").addEventListener("submit", async (e) => {
@@ -224,7 +234,14 @@ function renderHost() {
   $("lbl-amber").style.left = s.amberAt + "%"; $("lbl-amber").textContent = s.amberAt + "%";
   $("lbl-green").style.left = s.greenAt + "%"; $("lbl-green").textContent = s.greenAt + "%";
 
-  $("chip").textContent = {
+  const ended = !!s.endedAt;
+  $("board").classList.toggle("ended", ended);
+  ["btn-walkin", "btn-undo", "btn-end"].forEach((id) => { $(id).hidden = ended; });
+  if (ended) {
+    markHostedEnded(sid);
+    $("h-meta").textContent += " · ended " + timeOf(s.endedAt);
+  }
+  $("chip").textContent = ended ? "Check-in ended" : {
     red: n === 0 ? "Waiting for people" : "Just getting started",
     amber: "Filling up",
     green: "Almost everyone is here",
@@ -234,7 +251,9 @@ function renderHost() {
   sum.textContent = pct + "% checked in";
   const sub = document.createElement("span");
   sub.className = "sub";
-  sub.textContent = level === "full" ? "The class can start." : remaining + (remaining === 1 ? " person" : " people") + " still to check in";
+  sub.textContent = ended
+    ? "No more check-ins are accepted."
+    : level === "full" ? "The class can start." : remaining + (remaining === 1 ? " person" : " people") + " still to check in";
   sum.appendChild(sub);
 
   const arrivals = s.arrivals || [];
@@ -271,6 +290,35 @@ $("btn-walkin").addEventListener("click", async () => {
 $("btn-undo").addEventListener("click", async () => {
   try { await api("/" + sid + "/walkin", { method: "DELETE", key: hostKey }); toast("Last walk-in removed"); }
   catch (x) { toast(x.message); }
+});
+
+// Ending takes two taps so a stray click can't close the session
+let endArmed = null;
+function resetEnd() {
+  clearTimeout(endArmed); endArmed = null;
+  const btn = $("btn-end");
+  btn.textContent = "End check-in"; btn.classList.remove("danger"); btn.disabled = false;
+}
+$("btn-end").addEventListener("click", async () => {
+  const btn = $("btn-end");
+  if (!endArmed) {
+    btn.textContent = "Tap again to end";
+    btn.classList.add("danger");
+    endArmed = setTimeout(resetEnd, 4000);
+    return;
+  }
+  clearTimeout(endArmed);
+  btn.disabled = true;
+  try {
+    const res = await api("/" + sid + "/end", { method: "POST", key: hostKey });
+    markHostedEnded(sid);
+    const s = res.state;
+    try { sessionStorage.setItem("checkin-ended-msg", "Ended “" + s.title + "” with " + s.count + " of " + s.total + " checked in"); } catch {}
+    location.href = "/";
+  } catch (x) {
+    resetEnd();
+    toast(x.message);
+  }
 });
 
 function copy(text, label) {
@@ -315,10 +363,14 @@ function renderGuest() {
   cnt.append(b, " of " + total + " checked in");
 
   const done = deviceUsed();
+  const closed = !done && !!s.endedAt;
   $("g-mark").hidden = !done;
-  $("btn-checkin").hidden = done;
-  $("g-email-field").hidden = done;
-  if (done) {
+  $("btn-checkin").hidden = done || closed;
+  $("g-email-field").hidden = done || closed;
+  if (closed) {
+    $("g-head").textContent = "This check-in has ended";
+    $("g-note").textContent = "The host closed check-in for this session. Ask them if you still need to be counted.";
+  } else if (done) {
     $("g-head").textContent = "You’re checked in";
     $("g-note").textContent = level === "full"
       ? "Everyone is here. The class can start."
@@ -353,7 +405,8 @@ $("btn-checkin").addEventListener("click", async () => {
     renderGuest();
     if (res.already === "device") toast("This device already checked in");
   } catch (x) {
-    $("g-note").textContent = x.message;
+    if (x.status === 410) { state = { ...state, endedAt: Date.now() }; renderGuest(); }
+    else $("g-note").textContent = x.message;
   } finally { btn.disabled = false; }
 });
 

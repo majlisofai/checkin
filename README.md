@@ -10,7 +10,7 @@ A live QR check-in board for classes and workshops, running at **[checkin.majlis
    - **Green** from 60%
    - At 100% the board reads *Everyone is here. The class can start.*
 
-The host can add walk-ins for people who can't scan, and undo the last one.
+The host can add walk-ins for people who can't scan, and undo the last one. **End check-in** (tap twice to confirm) closes the session to new check-ins, updates every open screen, and returns the host to the home page to create the next one. An ended board stays viewable from *Your recent check-ins*.
 
 ## How it works
 
@@ -40,6 +40,7 @@ The host can add walk-ins for people who can't scan, and undo the last one.
 | `GET` | `/api/sessions/:sid` | Public state. With `x-host-key`, includes arrivals. |
 | `POST` | `/api/sessions/:sid/checkin` | `{device, email}` → `{already: false \| "device" \| "email", state}` |
 | `POST` / `DELETE` | `/api/sessions/:sid/walkin` | Add / undo a walk-in. Requires `x-host-key`. |
+| `POST` | `/api/sessions/:sid/end` | End the check-in. Requires `x-host-key`. Later check-ins and walk-ins get `410`. |
 | `GET` | `/api/sessions/:sid/ws` | WebSocket. Add `?key=` for the host feed. |
 
 ## Develop

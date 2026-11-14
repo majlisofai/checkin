@@ -59,6 +59,7 @@ export class Session extends DurableObject {
       amberAt: meta.amberAt,
       greenAt: meta.greenAt,
       createdAt: meta.createdAt,
+      endedAt: meta.endedAt || null,
       count: people.length,
     };
   }
@@ -105,7 +106,8 @@ export class Session extends DurableObject {
   async checkin({ device, cookie, email }) {
     const { meta, people } = await this.load();
     if (!meta) return { status: 404 };
-    const sameDevice = people.some((p) => (device && p.device === device) || (cookie && p.cookie === cookie));
+    if (meta.endedAt) return { status: 410 };
+    const sameDevice =people.some((p) => (device && p.device === device) || (cookie && p.cookie === cookie));
     if (sameDevice) return { status: 200, already: "device", state: this.publicState(meta, people) };
     if (people.some((p) => p.email === email)) return { status: 200, already: "email", state: this.publicState(meta, people) };
     if (people.length >= MAX_PEOPLE) return { status: 409 };
@@ -119,6 +121,7 @@ export class Session extends DurableObject {
     const { meta, people } = await this.load();
     if (!meta) return { status: 404 };
     if (!this.isHost(meta, key)) return { status: 403 };
+    if (meta.endedAt) return { status: 410 };
     if (people.length >= MAX_PEOPLE) return { status: 409 };
     people.push({ id: randomString(10, SID_ALPHABET), at: Date.now(), walkIn: true });
     await this.ctx.storage.put("people", people);
@@ -130,12 +133,25 @@ export class Session extends DurableObject {
     const { meta, people } = await this.load();
     if (!meta) return { status: 404 };
     if (!this.isHost(meta, key)) return { status: 403 };
+    if (meta.endedAt) return { status: 410 };
     const idx = people.findLastIndex((p) => p.walkIn);
     if (idx === -1) return { status: 200 };
     people.splice(idx, 1);
     await this.ctx.storage.put("people", people);
     this.broadcast(meta, people);
     return { status: 200 };
+  }
+
+  async end(key) {
+    const { meta, people } = await this.load();
+    if (!meta) return { status: 404 };
+    if (!this.isHost(meta, key)) return { status: 403 };
+    if (!meta.endedAt) {
+      meta.endedAt = Date.now();
+      await this.ctx.storage.put("meta", meta);
+      this.broadcast(meta, people);
+    }
+    return { status: 200, state: this.publicState(meta, people) };
   }
 
   async fetch(request) {
@@ -195,7 +211,7 @@ async function handleApi(request, env, url) {
     return json({ error: "Couldn't create the check-in. Try again." }, 503);
   }
 
-  const m = url.pathname.match(/^\/api\/sessions\/([^/]+)(?:\/(checkin|walkin|ws))?$/);
+  const m = url.pathname.match(/^\/api\/sessions\/([^/]+)(?:\/(checkin|walkin|end|ws))?$/);
   if (!m || !SID_RE.test(m[1])) return json({ error: "Not found" }, 404);
   const [, sid, action] = m;
   const stub = env.SESSIONS.get(env.SESSIONS.idFromName(sid));
@@ -229,6 +245,7 @@ async function handleApi(request, env, url) {
     const setCookie = `${DEVICE_COOKIE}=${cookie}; Path=/; Max-Age=31536000; HttpOnly; Secure; SameSite=Lax`;
     if (res.status === 404) return json({ error: "This check-in doesn't exist or has expired." }, 404);
     if (res.status === 409) return json({ error: "This check-in is full." }, 409);
+    if (res.status === 410) return json({ error: "This check-in has ended." }, 410);
     return json({ already: res.already, state: res.state }, 200, { "set-cookie": setCookie });
   }
 
@@ -237,7 +254,15 @@ async function handleApi(request, env, url) {
     if (res.status === 403) return json({ error: "This host link isn't valid." }, 403);
     if (res.status === 404) return json({ error: "This check-in doesn't exist or has expired." }, 404);
     if (res.status === 409) return json({ error: "This check-in is full." }, 409);
+    if (res.status === 410) return json({ error: "This check-in has ended." }, 410);
     return json({ ok: true });
+  }
+
+  if (action === "end" && request.method === "POST") {
+    const res = await stub.end(hostKey);
+    if (res.status === 403) return json({ error: "This host link isn't valid." }, 403);
+    if (res.status === 404) return json({ error: "This check-in doesn't exist or has expired." }, 404);
+    return json({ state: res.state });
   }
 
   return json({ error: "Not found" }, 404);
