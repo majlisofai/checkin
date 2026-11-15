@@ -10,7 +10,9 @@ A live QR check-in board for classes and workshops, running at **[checkin.majlis
    - **Green** from 60%
    - At 100% the board reads *Everyone is here. The class can start.*
 
-The host can add walk-ins for people who can't scan, and undo the last one. **End check-in** (tap twice to confirm) closes the session to new check-ins, updates every open screen, **downloads a CSV** of everyone who checked in (with email addresses), and returns the host to the home page to create the next one. The board also has a **Download CSV** button. An ended board stays viewable from *Your recent check-ins*.
+The host can add walk-ins for people who can't scan, and undo the last one. **End check-in** (tap twice to confirm) closes the session to new check-ins, updates every open screen, **downloads a CSV** of everyone who checked in (with email addresses), and returns the host to the home page to create the next one. The board also has a **Download CSV** button. An ended board stays viewable from **Past check-ins**.
+
+**Past check-ins** (`/past`, linked from the home page) lists the check-ins created on that browser. Each can be deleted, or all at once (two taps to confirm). Deleting erases the session's arrivals and email addresses from the server and closes any screens still showing it.
 
 ## How it works
 
@@ -22,7 +24,8 @@ The host can add walk-ins for people who can't scan, and undo the last one. **En
 
 | Link | Who | What |
 | --- | --- | --- |
-| `/` | Host | Create a check-in. Lists the check-ins you created on this browser. |
+| `/` | Host | Create a check-in. |
+| `/past` | Host | The check-ins you created on this browser, with delete. |
 | `/h/<id>#<key>` | Host | The live board. Anyone with this link can run the board, so share it only with co-hosts. |
 | `/c/<id>` | Participants | The page the QR code opens. |
 
@@ -39,6 +42,7 @@ The host can add walk-ins for people who can't scan, and undo the last one. **En
 | --- | --- | --- |
 | `POST` | `/api/sessions` | `{title, total, amberAt, greenAt}` → `{sid, key}` |
 | `GET` | `/api/sessions/:sid` | Public state. With `x-host-key`, includes anonymous arrivals. |
+| `DELETE` | `/api/sessions/:sid` | Erase the check-in and its data. Requires `x-host-key`. |
 | `GET` | `/api/sessions/:sid/export` | CSV of everyone checked in, with emails. Requires `x-host-key`. |
 | `POST` | `/api/sessions/:sid/checkin` | `{device, email}` → `{already: false \| "device" \| "email", state}` |
 | `POST` / `DELETE` | `/api/sessions/:sid/walkin` | Add / undo a walk-in. Requires `x-host-key`. |

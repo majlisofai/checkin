@@ -155,6 +155,18 @@ export class Session extends DurableObject {
     return { status: 200, state: this.publicState(meta, people) };
   }
 
+  async remove(key) {
+    const meta = await this.ctx.storage.get("meta");
+    if (!meta) return { status: 404 };
+    if (!this.isHost(meta, key)) return { status: 403 };
+    for (const ws of this.ctx.getWebSockets()) {
+      try { ws.send(JSON.stringify({ type: "deleted" })); ws.close(1000, "Check-in deleted"); } catch {}
+    }
+    await this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.deleteAll();
+    return { status: 200 };
+  }
+
   async exportCsv(key) {
     const { meta, people } = await this.load();
     if (!meta) return { status: 404 };
@@ -245,6 +257,13 @@ async function handleApi(request, env, url) {
     if (!res) return json({ error: "This check-in doesn't exist or has expired." }, 404);
     if (res.forbidden) return json({ error: "This host link isn't valid." }, 403);
     return json(res);
+  }
+
+  if (!action && request.method === "DELETE") {
+    const res = await stub.remove(hostKey);
+    if (res.status === 403) return json({ error: "This host link isn't valid." }, 403);
+    if (res.status === 404) return json({ error: "This check-in doesn't exist or has expired." }, 404);
+    return json({ ok: true });
   }
 
   if (action === "ws") {

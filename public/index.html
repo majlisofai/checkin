@@ -60,9 +60,22 @@
         <button type="submit" class="primary" id="f-submit">Create check-in</button>
       </div>
     </form>
-    <section class="recent" id="recent" hidden>
-      <h2>Your recent check-ins</h2>
-      <ul id="recent-list"></ul>
+    <p class="past-link" id="past-link" hidden><a href="/past">Past check-ins</a></p>
+  </section>
+
+  <section id="view-past" class="create" hidden>
+    <div>
+      <p class="eyebrow">Check-in</p>
+      <h1>Past check-ins</h1>
+    </div>
+    <p class="lede">Check-ins you created on this browser. Deleting one erases its arrivals and email addresses from the server. It can’t be undone, so download the CSV first if you need it.</p>
+    <section class="recent">
+      <ul id="past-list"></ul>
+      <p class="empty" id="past-empty" hidden>No past check-ins on this browser.</p>
+      <div class="form-actions">
+        <button type="button" id="btn-delete-all">Delete all</button>
+        <a class="btn" href="/">Create a new check-in</a>
+      </div>
     </section>
   </section>
 

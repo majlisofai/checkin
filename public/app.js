@@ -1,7 +1,7 @@
 "use strict";
 
 const $ = (id) => document.getElementById(id);
-const VIEWS = ["loading", "message", "create", "host", "guest"];
+const VIEWS = ["loading", "message", "create", "past", "host", "guest"];
 const show = (name) => VIEWS.forEach((v) => { $("view-" + v).hidden = v !== name; });
 
 const store = {
@@ -100,10 +100,18 @@ function connectLive(onState, key) {
     };
     ws.onmessage = (e) => {
       if (e.data === "pong") return;
-      try { const msg = JSON.parse(e.data); if (msg.type === "state") onState(msg.state); } catch {}
+      let msg;
+      try { msg = JSON.parse(e.data); } catch { return; }
+      if (msg.type === "state") onState(msg.state);
+      if (msg.type === "deleted") {
+        closed = true;
+        message("This check-in was deleted", "The host deleted this check-in and everything recorded in it.");
+      }
     };
     ws.onclose = () => {
-      clearInterval(pingTimer); setLive(false); startPolling();
+      clearInterval(pingTimer);
+      if (closed) return;
+      setLive(false); startPolling();
       retry = Math.min(retry + 1, 6);
       setTimeout(open, Math.min(30000, 1000 * 2 ** retry) * (0.5 + Math.random() / 2));
     };
@@ -118,26 +126,82 @@ function openCreate() {
   show("create");
   $("f-title").value = defaultTitle();
   $("f-title").placeholder = defaultTitle();
-  const recent = store.get("checkin-hosted", []);
-  $("recent").hidden = recent.length === 0;
-  const list = $("recent-list");
-  list.textContent = "";
-  for (const r of recent.slice(0, 8)) {
-    const li = document.createElement("li");
-    const a = document.createElement("a");
-    a.href = "/h/" + r.sid + "#" + r.key;
-    a.textContent = r.title;
-    if (r.ended) { const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = " · ended"; a.appendChild(tag); }
-    const t = document.createElement("time");
-    t.textContent = new Date(r.createdAt).toLocaleDateString([], { month: "short", day: "numeric" }) + " · " + timeOf(r.createdAt);
-    li.append(a, t);
-    list.appendChild(li);
-  }
+  const count = store.get("checkin-hosted", []).length;
+  $("past-link").hidden = count === 0;
+  $("past-link").firstElementChild.textContent = "Past check-ins (" + count + ")";
   $("f-title").focus();
   let endedMsg = null;
   try { endedMsg = sessionStorage.getItem("checkin-ended-msg"); sessionStorage.removeItem("checkin-ended-msg"); } catch {}
   if (endedMsg) toast(endedMsg);
 }
+
+/* ---------- Past check-ins ---------- */
+// Destructive buttons take two taps: the first arms them for 4 seconds
+function twoTap(btn, confirmLabel, action) {
+  const label = btn.textContent;
+  let armed = null;
+  const reset = () => { clearTimeout(armed); armed = null; btn.textContent = label; btn.classList.remove("danger"); btn.disabled = false; };
+  btn.addEventListener("click", async () => {
+    if (!armed) {
+      btn.textContent = confirmLabel; btn.classList.add("danger");
+      armed = setTimeout(reset, 4000);
+      return;
+    }
+    clearTimeout(armed);
+    btn.disabled = true;
+    try { await action(); } finally { reset(); }
+  });
+}
+
+// Erase a check-in on the server, then forget it here. One already gone from the server is just forgotten.
+async function deleteHosted(rec) {
+  try {
+    await api("/" + rec.sid, { method: "DELETE", key: rec.key });
+  } catch (x) {
+    if (x.status !== 404) throw x;
+  }
+  store.set("checkin-hosted", store.get("checkin-hosted", []).filter((r) => r.sid !== rec.sid));
+}
+
+function openPast() {
+  show("past");
+  document.title = "Past check-ins · The Majlis of AI";
+  const hosted = store.get("checkin-hosted", []);
+  const list = $("past-list");
+  list.textContent = "";
+  for (const r of hosted) {
+    const li = document.createElement("li");
+    const meta = document.createElement("div"); meta.className = "meta";
+    const a = document.createElement("a");
+    a.href = "/h/" + r.sid + "#" + r.key;
+    a.textContent = r.title;
+    if (r.ended) { const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = " · ended"; a.appendChild(tag); }
+    const t = document.createElement("time");
+    t.textContent = new Date(r.createdAt).toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" }) + " · " + timeOf(r.createdAt);
+    meta.append(a, t);
+    const del = document.createElement("button");
+    del.type = "button"; del.className = "small"; del.textContent = "Delete";
+    twoTap(del, "Tap to confirm", async () => {
+      try { await deleteHosted(r); toast("Deleted “" + r.title + "”"); openPast(); }
+      catch (x) { toast(x.message); }
+    });
+    li.append(meta, del);
+    list.appendChild(li);
+  }
+  $("past-empty").hidden = hosted.length > 0;
+  $("btn-delete-all").hidden = hosted.length === 0;
+}
+
+twoTap($("btn-delete-all"), "Tap again to delete all", async () => {
+  let done = 0, failed = 0;
+  for (const r of store.get("checkin-hosted", [])) {
+    try { await deleteHosted(r); done++; } catch { failed++; }
+  }
+  toast(failed
+    ? "Deleted " + done + ". " + failed + " couldn’t be deleted. Try again."
+    : "Deleted " + done + (done === 1 ? " check-in" : " check-ins"));
+  openPast();
+});
 
 function markHostedEnded(id) {
   const hosted = store.get("checkin-hosted", []);
@@ -160,7 +224,7 @@ $("create-form").addEventListener("submit", async (e) => {
     const res = await api("", { method: "POST", body: { title, total, amberAt, greenAt } });
     const hosted = store.get("checkin-hosted", []);
     hosted.unshift({ sid: res.sid, key: res.key, title, createdAt: Date.now() });
-    store.set("checkin-hosted", hosted.slice(0, 20));
+    store.set("checkin-hosted", hosted.slice(0, 100));
     location.href = "/h/" + res.sid + "#" + res.key;
   } catch (x) {
     err.textContent = x.message; err.hidden = false;
@@ -186,7 +250,7 @@ async function openHost() {
   const hosted = store.get("checkin-hosted", []);
   if (!hosted.some((r) => r.sid === sid)) {
     hosted.unshift({ sid, key: hostKey, title: state.title, createdAt: state.createdAt });
-    store.set("checkin-hosted", hosted.slice(0, 20));
+    store.set("checkin-hosted", hosted.slice(0, 100));
   }
   show("host");
   drawQR(checkinLink());
@@ -321,7 +385,7 @@ $("btn-end").addEventListener("click", async () => {
   markHostedEnded(sid);
   let msg = "Ended “" + s.title + "” with " + s.count + " of " + s.total + " checked in.";
   try { await downloadCsv(); msg += " The CSV is in your downloads."; }
-  catch { msg += " The CSV didn't download: open it from Your recent check-ins and tap Download CSV."; }
+  catch { msg += " The CSV didn't download: open it from Past check-ins and tap Download CSV."; }
   try { sessionStorage.setItem("checkin-ended-msg", msg); } catch {}
   // Give the browser a moment to start the download before leaving the page
   setTimeout(() => { location.href = "/"; }, 800);
@@ -438,6 +502,7 @@ $("btn-checkin").addEventListener("click", async () => {
 /* ---------- Routing ---------- */
 function route() {
   const m = location.pathname.match(/^\/(h|c)\/([a-z0-9]{8})\/?$/);
+  if (!m && /^\/past\/?$/.test(location.pathname)) { openPast(); return; }
   if (!m) {
     if (location.pathname !== "/") history.replaceState(null, "", "/");
     openCreate();
