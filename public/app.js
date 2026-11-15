@@ -261,12 +261,13 @@ function renderHost() {
   const list = $("arrivals");
   list.textContent = "";
   let walkNo = arrivals.filter((p) => p.walkIn).length;
+  let partNo = arrivals.length - walkNo;
   for (const p of arrivals.slice().reverse()) {
     const li = document.createElement("li");
     const av = document.createElement("span"); av.className = "av";
     const nm = document.createElement("span"); nm.className = "nm";
     if (p.walkIn) { av.textContent = "+1"; nm.textContent = "Walk-in " + walkNo--; }
-    else { av.textContent = (p.email || "?").slice(0, 1).toUpperCase(); nm.textContent = p.email || "Participant"; }
+    else { av.textContent = "✓"; nm.textContent = "Participant " + partNo--; }
     const t = document.createElement("time"); t.textContent = timeOf(p.at);
     li.append(av, nm, t);
     list.appendChild(li);
@@ -309,16 +310,40 @@ $("btn-end").addEventListener("click", async () => {
   }
   clearTimeout(endArmed);
   btn.disabled = true;
+  let s;
   try {
-    const res = await api("/" + sid + "/end", { method: "POST", key: hostKey });
-    markHostedEnded(sid);
-    const s = res.state;
-    try { sessionStorage.setItem("checkin-ended-msg", "Ended “" + s.title + "” with " + s.count + " of " + s.total + " checked in"); } catch {}
-    location.href = "/";
+    s = (await api("/" + sid + "/end", { method: "POST", key: hostKey })).state;
   } catch (x) {
     resetEnd();
     toast(x.message);
+    return;
   }
+  markHostedEnded(sid);
+  let msg = "Ended “" + s.title + "” with " + s.count + " of " + s.total + " checked in.";
+  try { await downloadCsv(); msg += " The CSV is in your downloads."; }
+  catch { msg += " The CSV didn't download: open it from Your recent check-ins and tap Download CSV."; }
+  try { sessionStorage.setItem("checkin-ended-msg", msg); } catch {}
+  // Give the browser a moment to start the download before leaving the page
+  setTimeout(() => { location.href = "/"; }, 800);
+});
+
+async function downloadCsv() {
+  const res = await fetch("/api/sessions/" + sid + "/export", { headers: { "x-host-key": hostKey } });
+  if (!res.ok) throw new Error("Couldn't download the list. Try again.");
+  const blob = await res.blob();
+  const match = (res.headers.get("content-disposition") || "").match(/filename="([^"]+)"/);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = match ? match[1] : "checkin.csv";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+$("btn-csv").addEventListener("click", async () => {
+  try { await downloadCsv(); toast("CSV downloaded"); } catch (x) { toast(x.message); }
 });
 
 function copy(text, label) {

@@ -10,7 +10,7 @@ A live QR check-in board for classes and workshops, running at **[checkin.majlis
    - **Green** from 60%
    - At 100% the board reads *Everyone is here. The class can start.*
 
-The host can add walk-ins for people who can't scan, and undo the last one. **End check-in** (tap twice to confirm) closes the session to new check-ins, updates every open screen, and returns the host to the home page to create the next one. An ended board stays viewable from *Your recent check-ins*.
+The host can add walk-ins for people who can't scan, and undo the last one. **End check-in** (tap twice to confirm) closes the session to new check-ins, updates every open screen, **downloads a CSV** of everyone who checked in (with email addresses), and returns the host to the home page to create the next one. The board also has a **Download CSV** button. An ended board stays viewable from *Your recent check-ins*.
 
 ## How it works
 
@@ -30,14 +30,16 @@ The host can add walk-ins for people who can't scan, and undo the last one. **En
 
 - **One check-in per device**: a random ID kept in the browser's local storage plus an HttpOnly cookie. A private window, another browser, or clearing site data gets around it; browsers don't expose a real hardware ID.
 - **One check-in per email address** per session.
-- Participants' phones only receive the count. Email addresses are sent only to screens holding the host key.
+- **No identities on screen.** The board lists arrivals as "Participant 1", "Walk-in 1" and so on. Email addresses never leave the server except in the CSV export, which requires the host key. Participants' phones only receive the count.
+- The CSV has the columns `session, number, email, type, checked_in_at_utc`, is UTF-8 with a BOM so Excel opens it cleanly, and escapes values that a spreadsheet would treat as formulas.
 
 ### API
 
 | Method | Path | Notes |
 | --- | --- | --- |
 | `POST` | `/api/sessions` | `{title, total, amberAt, greenAt}` → `{sid, key}` |
-| `GET` | `/api/sessions/:sid` | Public state. With `x-host-key`, includes arrivals. |
+| `GET` | `/api/sessions/:sid` | Public state. With `x-host-key`, includes anonymous arrivals. |
+| `GET` | `/api/sessions/:sid/export` | CSV of everyone checked in, with emails. Requires `x-host-key`. |
 | `POST` | `/api/sessions/:sid/checkin` | `{device, email}` → `{already: false \| "device" \| "email", state}` |
 | `POST` / `DELETE` | `/api/sessions/:sid/walkin` | Add / undo a walk-in. Requires `x-host-key`. |
 | `POST` | `/api/sessions/:sid/end` | End the check-in. Requires `x-host-key`. Later check-ins and walk-ins get `410`. |

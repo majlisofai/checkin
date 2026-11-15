@@ -67,7 +67,8 @@ export class Session extends DurableObject {
   hostState(meta, people) {
     return {
       ...this.publicState(meta, people),
-      arrivals: people.map((p) => ({ id: p.id, at: p.at, email: p.email || "", walkIn: !!p.walkIn })),
+      // Identities stay off the board: emails only leave the server in the CSV export
+      arrivals: people.map((p) => ({ id: p.id, at: p.at, walkIn: !!p.walkIn })),
     };
   }
 
@@ -154,6 +155,23 @@ export class Session extends DurableObject {
     return { status: 200, state: this.publicState(meta, people) };
   }
 
+  async exportCsv(key) {
+    const { meta, people } = await this.load();
+    if (!meta) return { status: 404 };
+    if (!this.isHost(meta, key)) return { status: 403 };
+    const cell = (value) => {
+      let s = String(value ?? "");
+      if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; // stop spreadsheets from running it as a formula
+      return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    const rows = [["session", "number", "email", "type", "checked_in_at_utc"]];
+    people.forEach((p, i) => {
+      rows.push([meta.title, i + 1, p.email || "", p.walkIn ? "walk-in" : "participant", new Date(p.at).toISOString()]);
+    });
+    const csv = "﻿" + rows.map((r) => r.map(cell).join(",")).join("\r\n") + "\r\n";
+    return { status: 200, csv, title: meta.title };
+  }
+
   async fetch(request) {
     // WebSocket upgrade, forwarded by the Worker
     const { meta, people } = await this.load();
@@ -211,7 +229,7 @@ async function handleApi(request, env, url) {
     return json({ error: "Couldn't create the check-in. Try again." }, 503);
   }
 
-  const m = url.pathname.match(/^\/api\/sessions\/([^/]+)(?:\/(checkin|walkin|end|ws))?$/);
+  const m = url.pathname.match(/^\/api\/sessions\/([^/]+)(?:\/(checkin|walkin|end|export|ws))?$/);
   if (!m || !SID_RE.test(m[1])) return json({ error: "Not found" }, 404);
   const [, sid, action] = m;
   const stub = env.SESSIONS.get(env.SESSIONS.idFromName(sid));
@@ -263,6 +281,20 @@ async function handleApi(request, env, url) {
     if (res.status === 403) return json({ error: "This host link isn't valid." }, 403);
     if (res.status === 404) return json({ error: "This check-in doesn't exist or has expired." }, 404);
     return json({ state: res.state });
+  }
+
+  if (action === "export" && request.method === "GET") {
+    const res = await stub.exportCsv(hostKey);
+    if (res.status === 403) return json({ error: "This host link isn't valid." }, 403);
+    if (res.status === 404) return json({ error: "This check-in doesn't exist or has expired." }, 404);
+    const slug = res.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+    return new Response(res.csv, {
+      headers: {
+        "content-type": "text/csv; charset=utf-8",
+        "content-disposition": `attachment; filename="checkin-${slug || sid}.csv"`,
+        "cache-control": "no-store",
+      },
+    });
   }
 
   return json({ error: "Not found" }, 404);
